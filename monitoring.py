@@ -62,11 +62,13 @@ class DropboxMonitor:
         min_poll_interval_sec: int,
         logger: logging.Logger,
         prom_port: int,
+        prom_address: str,
     ) -> None:
         self.dropbox = dropbox
         self.min_poll_interval_sec = min_poll_interval_sec
         self.logger = logger
         self.prom_port = prom_port
+        self.prom_address = prom_address
         self.status_matcher = re.compile(
             "(Syncing|Downloading|Uploading|Indexing) (\\d+) files"
         )
@@ -113,12 +115,13 @@ class DropboxMonitor:
             partial(self.get_status, Metric.NUM_UPLOADING)
         )
 
-        start_http_server(self.prom_port)
-        self.logger.info("Started Prometheus server on port %d", self.prom_port)
+        start_http_server(self.prom_port, addr=self.prom_address)
+        self.logger.info("Started Prometheus server on %s:%d", self.prom_address, self.prom_port)
 
     def get_status(self, metric: Metric) -> int:
         now = time()
         if now - self.last_query_time > self.min_poll_interval_sec:
+            self.last_query_time = now
             dropbox_result = self.dropbox.query_status()
             if dropbox_result:
                 self.parse_output(dropbox_result)
@@ -225,7 +228,13 @@ if __name__ == "__main__":
         help="minimum interval for polling Dropbox (in seconds)",
         default=5,
     )
-    parser.add_argument("-p", "--port", help="Prometheus port", default=8000)
+    parser.add_argument("-p", "--port", help="Prometheus port", type=int, default=8000)
+    parser.add_argument(
+        "-a",
+        "--address",
+        help="address the Prometheus endpoint listens on",
+        default="0.0.0.0",
+    )
     parser.add_argument("--log_level", default="INFO")
     parser.add_argument("--global_log_level", default="INFO")
     args = parser.parse_args()
@@ -244,6 +253,7 @@ if __name__ == "__main__":
         min_poll_interval_sec=int(args.min_poll_interval_sec),
         logger=logger,
         prom_port=args.port,
+        prom_address=args.address,
     )
     monitor.start()
 
