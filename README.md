@@ -65,9 +65,23 @@ are explained in the sections below.
 ### Checking Dropbox Version
 
 Dropbox will return incorrect information (`Dropbox daemon version: Not installed`) when you run `dropbox version` in
-the container. In case you ever need to know which version you have installed, instead run the following:
+the container. The version is also printed in the container logs on startup. In case you ever need to know which
+version you have installed, instead run the following:
 
-    $ docker exec -it dropbox cat /opt/dropbox/bin/VERSION
+    $ docker exec -it dropbox cat /opt/dropbox-client/VERSION
+
+### Updating Dropbox
+
+The Dropbox client is baked into the image at build time, so nothing is downloaded when the container starts.
+To update, pull a newer image or rebuild it yourself:
+
+    $ docker build --pull --no-cache -t dropbox .
+
+`--no-cache` is required, otherwise Docker reuses the cached layer that downloaded the client instead of fetching
+the latest version. Dropbox stops supporting old clients after a while, so rebuild the image regularly.
+
+If you're upgrading an existing setup, the `bin/` folder inside the `/opt/dropbox` volume is no longer used and
+may be deleted.
 
 
 ### Persisting Data
@@ -95,10 +109,12 @@ zones when comparing file timestamps, leading to overwritten files and data loss
 You can pass your local timezone as an environment variable to the container: `-e "TZ=Australia/Brisbane"`
 
 If you're on Linux 🐧, you can mount your `/etc/timezone` and `/etc/localtime` files into the container instead.
+Use either this mount or `TZ`, not both: with `TZ` set, the entrypoint writes `/etc/timezone` and `/etc/localtime`
+itself, which fails against a read-only bind mount.
 
     $ docker run --name=dropbox \
-      -v "/etc/timezone:/etc/timezone" \
-      -v "/etc/localtime:/etc/localtime" \
+      -v "/etc/timezone:/etc/timezone:ro" \
+      -v "/etc/localtime:/etc/localtime:ro" \
       [...]
       otherguy/dropbox:latest
 
@@ -160,10 +176,6 @@ files. Defaults to `1000`.
 If set, runs Dropbox with a custom user id. This **must** match the group id of the owner of the mounted
 files. Defaults to `1000`.
 
-- `DROPBOX_SKIP_UPDATE`
-If set to `true`, skips updating the Dropbox app on container startup. _Note:_ This is not very reliable
-because the Dropbox daemon will still try to update itself even if this is set to `true`.
-
 - `POLLING_INTERVAL`
 Needs to be set to a positive integer value. The Dropbox daemon is polled for its status at regular intervals,
 which can be configured to reduce load on the system. This is the number in seconds to wait between polling the
@@ -175,16 +187,23 @@ in order to prevent long startup times. _Note:_ please make sure to have correct
 you do this! Implemented for [#25](https://github.com/otherguy/docker-dropbox/issues/25).
 
 - `ENABLE_MONITORING`
-If this is set to `true`, an endpoint for Prometheus monitoring is enabled on port 8000. This provides the metrics
-`dropbox_status`, `dropbox_num_syncing`, `dropbox_num_downloading`, and `dropbox_num_uploading`, which may be 
-useful for setting alerts to ensure that Dropbox is syncing properly and keeps itself up to date. Note this is 
-still experimental and off by default.
+If this is set to `true`, an endpoint for Prometheus monitoring is enabled on port `MONITORING_PORT` (default
+`8000`) on `MONITORING_ADDRESS`. This provides the metrics `dropbox_status`, `dropbox_num_syncing`,
+`dropbox_num_downloading`, and `dropbox_num_uploading`, which may be useful for setting alerts to ensure that
+Dropbox is syncing properly and keeps itself up to date. Note this is still experimental and off by default.
+
+- `MONITORING_ADDRESS`
+Address the Prometheus endpoint listens on. Defaults to `0.0.0.0`. The endpoint is unauthenticated, so with
+`--net=host` it is reachable from the LAN; set this to `127.0.0.1` to keep it local to the host.
+
+- `MONITORING_PORT`
+Port the Prometheus endpoint listens on. Defaults to `8000`.
 
 
 ### Volumes
 
 - `/opt/dropbox`
-This represents the daemon user's home directory in the container. On the host, it will be populated with some binaries, some configuration, account settings, and other settings for Dropbox. If you don't mount this folder, your account needs to be linked every time you restart the container.
+This represents the daemon user's home directory in the container. On the host, it will be populated with some configuration, account settings, and other settings for Dropbox. If you don't mount this folder, your account needs to be linked every time you restart the container.
 
 - `/opt/dropbox/Dropbox`
 The actual Dropbox folder, containing all your synced files. Note that you may need to omit this on the first run so that Dropbox can have control to create it. Once it is created in the other volume, you can recreate the container with this volume as well.
